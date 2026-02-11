@@ -10,18 +10,17 @@
         .card { background: white; padding: 30px; border-radius: 20px; text-align: center; width: 90%; max-width: 350px; box-shadow: 0 10px 30px rgba(0,0,0,0.1); }
         #shareBtn { background: #06C755; color: white; border: none; padding: 15px 0; width: 100%; border-radius: 12px; font-weight: bold; cursor: pointer; font-size: 16px; margin-top: 20px; transition: 0.3s; }
         #shareBtn:disabled { background: #e0e0e0; color: #999; cursor: not-allowed; }
-        .diagnostic { font-size: 10px; color: #aaa; margin-top: 20px; text-align: left; background: #fafafa; padding: 10px; border-radius: 8px; border: 1px solid #eee; word-break: break-all; }
+        .diag { font-size: 10px; color: #aaa; margin-top: 20px; text-align: left; background: #fafafa; padding: 10px; border-radius: 8px; border: 1px solid #eee; word-break: break-all; }
     </style>
 </head>
 <body>
     <div class="card">
         <h3 style="margin-top:0">雨思名片系統</h3>
-        <p id="info" style="font-size:15px; color:#333;">正在讀取資料...</p>
+        <p id="info" style="font-size:15px; color:#333;">正在識別名片...</p>
         <button id="shareBtn" onclick="doShare()" disabled>確認中...</button>
-        <div class="diagnostic">
-            <b>系統診斷：</b><br>
+        <div class="diag">
             識別 ID：<span id="diag-id" style="color:blue">搜尋中</span><br>
-            狀態：<span id="diag-status">初始化</span>
+            狀態：<span id="diag-status">載入中</span>
         </div>
     </div>
 
@@ -29,65 +28,66 @@
         const LIFF_ID = '2009104422-Un7RU7tQ'; 
         const GAS_API = 'https://script.google.com/macros/s/AKfycbwtAVozv0JnuTdPRI3y-dPZN_MOWnafxc74nPP4NbVqS8ukNTp_5fiJPxLl6kMC4S8i/exec'; 
 
-        // 【超級過濾器】排除所有 LINE 產生的 Token 雜訊
+        // 【終極攔截器】在 LINE 產生雜訊前鎖定 ID
         function getCleanID() {
-            const url = new URL(window.location.href);
-            
-            // 1. 優先找錨點 (#雨思設計)
+            // 優先找 # 號後面的文字
             let hash = window.location.hash.substring(1);
-            if (hash && !hash.includes('access_token')) {
-                return decodeURIComponent(hash).split('?')[0];
+            if (hash) {
+                let id = decodeURIComponent(hash).split('?')[0].split('&')[0];
+                // 如果抓到的是 Token (長度通常 > 50)，則無視它
+                if (id && id.length < 30 && !id.includes('access_token')) return id;
             }
 
-            // 2. 找標準參數 (?id=)
-            const params = new URLSearchParams(url.search);
-            let id = params.get('id');
-            if (id && !id.includes('access_token')) return id;
+            // 找標準參數 ?id=
+            const params = new URLSearchParams(window.location.search);
+            let idParam = params.get('id');
+            if (idParam && idParam.length < 30) return idParam;
 
-            // 3. 找 liff.state 中的隱藏 ID
-            const state = params.get('liff.state');
-            if (state) {
-                const sp = new URLSearchParams(decodeURIComponent(state).includes('?') ? decodeURIComponent(state).split('?')[1] : decodeURIComponent(state));
-                let stateId = sp.get('id');
-                if (stateId && !stateId.includes('access_token')) return stateId;
-            }
-            return sessionStorage.getItem('vcard_cache');
+            // 從本地記憶體恢復 (轉址後的最後救星)
+            return localStorage.getItem('backup_vcard_id');
         }
 
         async function init() {
             const info = document.getElementById('info');
             const btn = document.getElementById('shareBtn');
-            const dId = document.getElementById('diag-id');
-            const dStatus = document.getElementById('diag-status');
+            const diagId = document.getElementById('diag-id');
+            const diagStatus = document.getElementById('diag-status');
 
+            // 第一毫秒鎖定 ID
             const id = getCleanID();
             if (id) {
-                sessionStorage.setItem('vcard_cache', id);
-                dId.innerText = id;
-                try {
-                    dStatus.innerText = "連線 GAS 資料庫...";
-                    const res = await fetch(`${GAS_API}?id=${encodeURIComponent(id)}`);
+                localStorage.setItem('backup_vcard_id', id);
+                diagId.innerText = id;
+            }
+
+            try {
+                diagStatus.innerText = "初始化 LINE SDK...";
+                await liff.init({ liffId: LIFF_ID });
+
+                // 再次確認 ID (避免登入跳轉後遺失)
+                const finalID = id || localStorage.getItem('backup_vcard_id');
+                
+                if (finalID) {
+                    diagId.innerText = finalID;
+                    diagStatus.innerText = "連線雲端資料庫...";
+                    const res = await fetch(`${GAS_API}?id=${encodeURIComponent(finalID)}`);
                     const result = await res.json();
                     
                     if (result.success) {
-                        info.innerText = `分享對象：${result.name}`;
                         window.flexData = result.data;
-                        
-                        dStatus.innerText = "啟動 LINE 服務...";
-                        await liff.init({ liffId: LIFF_ID });
-                        
+                        info.innerText = `分享對象：${result.name}`;
                         btn.innerText = liff.isLoggedIn() ? "立即發送名片" : "點擊登入並分享";
                         btn.disabled = false;
-                        dStatus.innerText = "系統就緒";
+                        diagStatus.innerText = "準備就緒";
                     } else {
-                        info.innerText = "找不到「" + id + "」的資料";
-                        dStatus.innerText = "API 查詢無結果";
+                        info.innerText = "找不到「" + finalID + "」的資料";
+                        diagStatus.innerText = "API 查無資料";
                     }
-                } catch (err) { dStatus.innerText = "連線錯誤: " + err.message; }
-            } else {
-                info.innerText = "請由正確連結進入";
-                dId.innerText = "未偵測到有效 ID";
-            }
+                } else {
+                    info.innerText = "請由名片連結進入";
+                    diagId.innerText = "未偵測到參數";
+                }
+            } catch (err) { diagStatus.innerText = "連線失敗: " + err.message; }
         }
 
         async function doShare() {
@@ -97,7 +97,7 @@
                 try {
                     const res = await liff.shareTargetPicker([window.flexData]);
                     if (res) liff.closeWindow();
-                } catch (err) { alert("發送失敗：請檢查 LIFF Scopes"); }
+                } catch (err) { alert("發送失敗：請確認 LIFF 後台 Scopes"); }
             }
         }
         init();
