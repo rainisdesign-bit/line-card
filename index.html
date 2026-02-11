@@ -17,9 +17,9 @@
 <body>
     <div class="card">
         <h2>名片分享系統</h2>
-        <p id="info" class="info">連線中...</p>
+        <p id="info" class="info">連線雲端資料中...</p>
         <button id="shareBtn" onclick="doShare()" disabled>確認中...</button>
-        <div class="debug-box" id="debug">初始化中...</div>
+        <div class="debug-box" id="debug">系統準備中...</div>
     </div>
 
     <script>
@@ -27,22 +27,32 @@
         const GAS_API = 'https://script.google.com/macros/s/AKfycbwtAVozv0JnuTdPRI3y-dPZN_MOWnafxc74nPP4NbVqS8ukNTp_5fiJPxLl6kMC4S8i/exec'; 
         let flexData = null;
 
-        // 【過濾解碼器】排除 LINE 的雜訊金鑰
-        function getCleanID() {
-            // A. 從 Hash 抓取 (#雨思設計)
+        // 【終極參數捕捉器】支援 # 格式並過濾亂碼
+        function getID() {
+            const url = new URL(window.location.href);
+            const params = new URLSearchParams(url.search);
+
+            // 1. 優先嘗試 Hash (#雨思設計) - 對應你剛改的公式
             let hash = window.location.hash.substring(1);
-            if (hash && hash.length > 1) {
-                // 過濾掉 Hash 後面黏著的參數
-                let cleanId = decodeURIComponent(hash).split('?')[0].split('&')[0];
-                if (cleanId && !cleanId.includes('access_token')) return cleanId;
+            if (hash) {
+                let id = decodeURIComponent(hash).split('?')[0].split('&')[0];
+                if (id && !id.includes('access_token') && id.length < 50) return id;
             }
 
-            // B. 從 URL 參數抓取
-            const urlParams = new URLSearchParams(window.location.search);
-            let id = urlParams.get('id');
-            if (id && !id.includes('access_token')) return id;
+            // 2. 嘗試標準參數 (?id=...)
+            let idParam = params.get('id');
+            if (idParam && !idParam.includes('access_token')) return idParam;
 
-            return sessionStorage.getItem('last_known_id');
+            // 3. 核心救援：從 LINE 跳轉後的 liff.state 中抓回 ID
+            const state = params.get('liff.state');
+            if (state) {
+                const stateParams = new URLSearchParams(state.startsWith('?') ? state : '?' + state);
+                let stateId = stateParams.get('id');
+                if (stateId && !stateId.includes('access_token')) return stateId;
+            }
+
+            // 4. 最後從本地快取恢復
+            return localStorage.getItem('last_known_id');
         }
 
         async function init() {
@@ -50,9 +60,9 @@
             const btn = document.getElementById('shareBtn');
             const debug = document.getElementById('debug');
 
-            const id = getCleanID();
+            const id = getID();
             if (id) {
-                sessionStorage.setItem('last_known_id', id);
+                localStorage.setItem('last_known_id', id);
                 debug.innerText = "偵測對象：" + id;
             } else {
                 info.innerText = "請由名片連結進入";
@@ -74,7 +84,7 @@
                     info.innerText = `找不到資料：${id}`;
                 }
             } catch (err) {
-                debug.innerText = "API 錯誤：" + err.message;
+                debug.innerText = "連線失敗：" + err.message;
             }
         }
 
@@ -82,8 +92,12 @@
             if (!liff.isLoggedIn()) {
                 liff.login({ redirectUri: window.location.href });
             } else {
-                const res = await liff.shareTargetPicker([flexData]);
-                if (res) liff.closeWindow();
+                try {
+                    const res = await liff.shareTargetPicker([flexData]);
+                    if (res) liff.closeWindow();
+                } catch (err) {
+                    alert("發送失敗：請確認後台 Scopes 勾選 shareTargetPicker");
+                }
             }
         }
         init();
