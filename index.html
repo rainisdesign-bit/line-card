@@ -7,24 +7,19 @@
     <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
     <style>
         body { font-family: "Microsoft JhengHei", sans-serif; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; background: #f4f7f9; }
-        .card { background: white; padding: 30px; border-radius: 20px; text-align: center; width: 90%; max-width: 350px; box-shadow: 0 10px 30px rgba(0,0,0,0.1); }
+        .card { background: white; padding: 40px; border-radius: 20px; text-align: center; width: 85%; max-width: 350px; box-shadow: 0 10px 30px rgba(0,0,0,0.1); }
         #shareBtn { background: #06C755; color: white; border: none; padding: 15px 0; width: 100%; border-radius: 12px; font-weight: bold; cursor: pointer; font-size: 16px; margin-top: 20px; transition: 0.3s; }
         #shareBtn:disabled { background: #e0e0e0; color: #999; cursor: not-allowed; }
-        .info { font-size: 15px; color: #333; margin-bottom: 10px; font-weight: bold; }
-        .debug-panel { font-size: 10px; color: #999; margin-top: 20px; text-align: left; background: #f8f9fa; padding: 10px; border-radius: 8px; border: 1px solid #eee; word-break: break-all; }
+        .info { font-size: 14px; color: #666; margin-bottom: 10px; line-height: 1.6; }
+        .debug-log { font-size: 10px; color: #ccc; margin-top: 20px; text-align: left; background: #fafafa; padding: 8px; border-radius: 5px; }
     </style>
 </head>
 <body>
     <div class="card">
-        <h3 style="margin-top:0">雨思名片系統</h3>
-        <p id="info" class="info">連線中...</p>
+        <h2>名片分享系統</h2>
+        <p id="info" class="info">連線雲端資料庫中...</p>
         <button id="shareBtn" onclick="doShare()" disabled>確認中...</button>
-        
-        <div class="debug-panel">
-            <b>診斷資訊：</b><br>
-            識別 ID：<span id="found-id">搜尋中...</span><br>
-            系統狀態：<span id="sys-status">初始化</span>
-        </div>
+        <div class="debug-log" id="debug">系統初始化中...</div>
     </div>
 
     <script>
@@ -32,63 +27,64 @@
         const GAS_API = 'https://script.google.com/macros/s/AKfycbwtAVozv0JnuTdPRI3y-dPZN_MOWnafxc74nPP4NbVqS8ukNTp_5fiJPxLl6kMC4S8i/exec'; 
         let flexData = null;
 
-        // 【核心修正】採用多重路徑搜尋 ID
-        async function getFinalID() {
-            // 1. 嘗試從當前網址抓取
-            const params = new URLSearchParams(window.location.search);
-            let id = params.get('id');
+        // 【終極 ID 救援器】
+        function getID() {
+            // 1. 嘗試從 URL Hash 抓取 (#雨思設計)
+            let id = window.location.hash.substring(1);
+            if (id && id.length > 1) return decodeURIComponent(id);
+
+            // 2. 嘗試從 URL Query 抓取 (?id=...)
+            const urlParams = new URLSearchParams(window.location.search);
+            id = urlParams.get('id');
             if (id) return id;
 
-            // 2. 嘗試從 LIFF 內部的 liff.state 抓取
-            const state = params.get('liff.state');
+            // 3. 嘗試從 liff.state 抓取
+            const state = urlParams.get('liff.state');
             if (state) {
-                const stateParams = new URLSearchParams(decodeURIComponent(state));
+                const stateParams = new URLSearchParams(state.startsWith('?') ? state : '?' + state);
                 id = stateParams.get('id');
                 if (id) return id;
             }
 
-            // 3. 嘗試從手機 Session 恢復
-            return sessionStorage.getItem('saved_id');
+            // 4. 嘗試從本地長期快取抓取
+            return localStorage.getItem('last_known_id');
         }
 
         async function init() {
             const info = document.getElementById('info');
             const btn = document.getElementById('shareBtn');
-            const foundIdSpan = document.getElementById('found-id');
-            const sysStatus = document.getElementById('sys-status');
+            const debug = document.getElementById('debug');
+
+            const id = getID();
+            if (id) {
+                localStorage.setItem('last_known_id', id);
+                debug.innerText = "偵測到對象：" + id;
+            } else {
+                info.innerText = "請重新由名片連結進入";
+                debug.innerText = "找不到 ID 參數";
+                return;
+            }
 
             try {
-                // 先啟動 LIFF
-                await liff.init({ liffId: LIFF_ID });
-                sysStatus.innerText = "LIFF 已就緒";
-
-                // 從 LIFF 環境中精確獲取 ID
-                const id = await getFinalID();
+                // 向 GAS 請求 JSON 資料
+                const res = await fetch(`${GAS_API}?id=${encodeURIComponent(id)}`);
+                const result = await res.json();
                 
-                if (id) {
-                    sessionStorage.setItem('saved_id', id);
-                    foundIdSpan.innerText = id;
+                if (result.success) {
+                    flexData = result.data;
+                    info.innerText = `分享對象：${result.name}`;
                     
-                    // 向 GAS 請求資料
-                    sysStatus.innerText = "抓取雲端資料...";
-                    const res = await fetch(`${GAS_API}?id=${encodeURIComponent(id)}`);
-                    const result = await res.json();
+                    // 初始化 LIFF
+                    await liff.init({ liffId: LIFF_ID });
                     
-                    if (result.success) {
-                        flexData = result.data;
-                        info.innerText = `分享對象：${result.name}`;
-                        btn.innerText = liff.isLoggedIn() ? "立即發送名片" : "點擊登入並分享";
-                        btn.disabled = false;
-                        sysStatus.innerText = "完成";
-                    } else {
-                        info.innerText = `找不到 ID: ${id}`;
-                    }
+                    debug.innerText = "LINE 服務已就緒";
+                    btn.innerText = liff.isLoggedIn() ? "立即發送名片" : "點擊登入並分享";
+                    btn.disabled = false;
                 } else {
-                    info.innerText = "請重新從名片連結進入";
-                    foundIdSpan.innerText = "未識別";
+                    info.innerText = `找不到資料：${id}`;
                 }
             } catch (err) {
-                sysStatus.innerText = "錯誤: " + err.message;
+                debug.innerText = "API 連線失敗：" + err.message;
             }
         }
 
@@ -100,7 +96,7 @@
                     const res = await liff.shareTargetPicker([flexData]);
                     if (res) liff.closeWindow();
                 } catch (err) {
-                    alert("發送失敗：請確認 Scopes 是否勾選 shareTargetPicker");
+                    alert("發送失敗：請檢查 Scopes 設定");
                 }
             }
         }
