@@ -8,17 +8,19 @@
     <style>
         body { font-family: "Microsoft JhengHei", sans-serif; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; background: #f4f7f9; }
         .card { background: white; padding: 30px; border-radius: 20px; text-align: center; width: 90%; max-width: 350px; box-shadow: 0 10px 30px rgba(0,0,0,0.1); }
-        #shareBtn { background: #06C755; color: white; border: none; padding: 15px 0; width: 100%; border-radius: 12px; font-weight: bold; cursor: pointer; font-size: 16px; margin-top: 20px; }
-        #shareBtn:disabled { background: #e0e0e0; color: #999; }
-        .diagnostic { font-size: 10px; color: #aaa; margin-top: 20px; text-align: left; background: #fafafa; padding: 10px; border-radius: 8px; border: 1px solid #eee; word-break: break-all; }
+        #shareBtn { background: #06C755; color: white; border: none; padding: 15px 0; width: 100%; border-radius: 12px; font-weight: bold; cursor: pointer; font-size: 16px; margin-top: 20px; transition: 0.3s; }
+        #shareBtn:disabled { background: #e0e0e0; color: #999; cursor: not-allowed; }
+        .info { font-size: 15px; color: #333; margin-bottom: 15px; font-weight: bold; }
+        .diag { font-size: 10px; color: #999; margin-top: 20px; text-align: left; background: #f8f9fa; padding: 10px; border-radius: 8px; border: 1px solid #eee; word-break: break-all; }
     </style>
 </head>
 <body>
     <div class="card">
-        <h3 id="info">名片讀取中...</h3>
+        <h3 style="margin-top:0">雨思名片系統</h3>
+        <p id="info" class="info">讀取雲端資料中...</p>
         <button id="shareBtn" onclick="doShare()" disabled>確認中...</button>
-        <div class="diagnostic">
-            系統診斷：<br>
+        <div class="diag">
+            <b>診斷資訊：</b><br>
             識別 ID：<span id="diag-id" style="color:blue">搜尋中</span><br>
             狀態：<span id="diag-status">初始化</span>
         </div>
@@ -29,28 +31,26 @@
         const GAS_API = 'https://script.google.com/macros/s/AKfycbwtAVozv0JnuTdPRI3y-dPZN_MOWnafxc74nPP4NbVqS8ukNTp_5fiJPxLl6kMC4S8i/exec'; 
         let flexData = null;
 
-        // 【暴力掃描器】從亂碼堆中強行挖出 ID
-        function forceGetID() {
-            const raw = decodeURIComponent(window.location.href);
+        // 【雷達掃描器】無視位置，直接從全網址搜尋 ID
+        function radarGetID() {
+            const fullUrl = decodeURIComponent(window.location.href);
             
-            // 1. 嘗試從 # 號後方抓取 (#雨思設計)
+            // 1. 優先從錨點搜尋 (#)
             if (window.location.hash) {
-                let h = decodeURIComponent(window.location.hash.substring(1)).split('?')[0];
-                if (h && !h.includes('access_token')) return h;
+                let h = window.location.hash.replace('#', '').split('?')[0];
+                if (h && h.length < 20 && !h.includes('access_token')) return h;
             }
 
-            // 2. 嘗試從 ?id= 參數抓取
-            const p = new URLSearchParams(window.location.search);
-            if (p.has('id')) return p.get('id');
+            // 2. 從標準參數搜尋 (?id=)
+            const params = new URLSearchParams(window.location.search);
+            if (params.has('id')) return params.get('id');
 
-            // 3. 嘗試從 liff.state 抓取
-            const state = p.get('liff.state');
+            // 3. 從 LINE 隱藏的 liff.state 搜尋
+            const state = params.get('liff.state');
             if (state) {
                 const sp = new URLSearchParams(decodeURIComponent(state).includes('?') ? decodeURIComponent(state).split('?')[1] : decodeURIComponent(state));
                 if (sp.has('id')) return sp.get('id');
             }
-
-            // 4. 最後退路：手機本地記憶 (localStorage)
             return localStorage.getItem('vcard_backup');
         }
 
@@ -60,8 +60,7 @@
             const diagId = document.getElementById('diag-id');
             const diagStatus = document.getElementById('diag-status');
 
-            // 第一毫秒搶救 ID
-            let id = forceGetID();
+            let id = radarGetID();
             if (id) {
                 localStorage.setItem('vcard_backup', id);
                 diagId.innerText = id;
@@ -70,30 +69,30 @@
             try {
                 await liff.init({ liffId: LIFF_ID });
                 diagStatus.innerText = "LIFF 已就緒";
-
+                
                 if (!id) id = localStorage.getItem('vcard_backup');
 
                 if (id) {
                     diagId.innerText = id;
-                    diagStatus.innerText = "讀取雲端資料...";
+                    diagStatus.innerText = "同步 GAS 資料庫...";
                     const res = await fetch(`${GAS_API}?id=${encodeURIComponent(id)}`);
                     const result = await res.json();
                     
                     if (result.success) {
                         flexData = result.data;
-                        info.innerText = `分享：${result.name}`;
+                        info.innerText = `分享對象：${result.name}`;
                         btn.innerText = liff.isLoggedIn() ? "立即發送名片" : "點擊登入並分享";
                         btn.disabled = false;
-                        diagStatus.innerText = "系統完成";
+                        diagStatus.innerText = "完成";
                     } else {
                         info.innerText = "找不到資料：" + id;
                     }
                 } else {
                     info.innerText = "請由名片連結進入";
-                    diagId.innerText = "未偵測到參數";
+                    diagId.innerText = "未偵測到 ID";
                 }
             } catch (err) {
-                diagStatus.innerText = "錯誤: " + err.message;
+                diagStatus.innerText = "系統錯誤: " + err.message;
             }
         }
 
