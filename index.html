@@ -20,7 +20,7 @@
         <p id="info" class="msg">連線中...</p>
         <button id="shareBtn" onclick="doShare()" disabled>確認中...</button>
         <div class="diag">
-            <b>診斷資訊：</b><br>
+            <b>系統診斷：</b><br>
             識別 ID：<span id="diag-id" style="color:blue">搜尋中</span><br>
             狀態：<span id="diag-status">初始化</span>
         </div>
@@ -28,29 +28,31 @@
 
     <script>
         const LIFF_ID = '2009104422-Un7RU7tQ'; 
-        // ⚠️ 請檢查：這裡的網址必須是你最後一次「部署」後產生的新網址
         const GAS_API = 'https://script.google.com/macros/s/AKfycbwtAVozv0JnuTdPRI3y-dPZN_MOWnafxc74nPP4NbVqS8ukNTp_5fiJPxLl6kMC4S8i/exec'; 
 
         let flexData = null;
 
-        // 【通用解析法】相容 #、? 以及跳轉後的網址
-        function getTargetID() {
-            const url = window.location.href;
+        // 【嚴格過濾解析器】只抓取真正的名片 ID，排除 Token 雜訊
+        function getPureID() {
+            const url = new URL(window.location.href);
             
-            // 1. 找 # 號 (例如 #雨思設計)
-            if (window.location.hash) {
-                return decodeURIComponent(window.location.hash.substring(1)).split('?')[0];
+            // 優先找 # 號後面的文字 (格式：...#雨思設計)
+            let hash = window.location.hash.substring(1);
+            if (hash && !hash.includes('access_token')) {
+                return decodeURIComponent(hash).split('?')[0];
             }
 
-            // 2. 找 ?id= 參數
-            const params = new URLSearchParams(window.location.search);
-            if (params.has('id')) return params.get('id');
+            // 找網址參數 ?id=
+            const params = new URLSearchParams(url.search);
+            let idParam = params.get('id');
+            if (idParam && !idParam.includes('access_token')) return idParam;
 
-            // 3. 找跳轉後的 liff.state
-            const state = params.get('liff.state');
-            if (state) {
-                const sp = new URLSearchParams(decodeURIComponent(state).includes('?') ? decodeURIComponent(state).split('?')[1] : decodeURIComponent(state));
-                if (sp.has('id')) return sp.get('id');
+            // 找跳轉後隱藏在 liff.state 裡的原始 ID
+            const liffState = params.get('liff.state');
+            if (liffState) {
+                const decodedState = decodeURIComponent(liffState);
+                const stateParams = new URLSearchParams(decodedState.includes('?') ? decodedState.split('?')[1] : decodedState);
+                if (stateParams.has('id')) return stateParams.get('id');
             }
             return null;
         }
@@ -61,11 +63,11 @@
             const diagId = document.getElementById('diag-id');
             const diagStatus = document.getElementById('diag-status');
 
-            const id = getTargetID();
+            const id = getPureID();
             if (id) {
                 diagId.innerText = id;
                 try {
-                    diagStatus.innerText = "正在連線 GAS...";
+                    diagStatus.innerText = "連線 GAS 資料庫...";
                     const res = await fetch(`${GAS_API}?id=${encodeURIComponent(id)}`);
                     const result = await res.json();
                     
@@ -73,18 +75,18 @@
                         flexData = result.data;
                         info.innerText = `分享對象：${result.name}`;
                         
-                        diagStatus.innerText = "啟動 LINE 服務...";
+                        diagStatus.innerText = "初始化 LINE SDK...";
                         await liff.init({ liffId: LIFF_ID });
                         
                         btn.innerText = liff.isLoggedIn() ? "立即發送名片" : "點擊登入並分享";
                         btn.disabled = false;
-                        diagStatus.innerText = "連線成功";
+                        diagStatus.innerText = "系統完成";
                     } else {
                         info.innerText = "找不到資料：" + id;
-                        diagStatus.innerText = "API 回傳失敗";
+                        diagStatus.innerText = "試算表無此 ID";
                     }
                 } catch (err) {
-                    diagStatus.innerText = "API 連線錯誤: " + err.message;
+                    diagStatus.innerText = "連線失敗: " + err.message;
                 }
             } else {
                 info.innerText = "請由名片連結進入";
@@ -100,7 +102,7 @@
                     const res = await liff.shareTargetPicker([flexData]);
                     if (res) liff.closeWindow();
                 } catch (err) {
-                    alert("發送失敗：請檢查 LIFF 權限");
+                    alert("發送失敗：請確認後台 Scopes 勾選 shareTargetPicker");
                 }
             }
         }
