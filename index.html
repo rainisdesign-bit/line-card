@@ -7,19 +7,21 @@
     <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
     <style>
         body { font-family: "Microsoft JhengHei", sans-serif; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; background: #f4f7f9; }
-        .card { background: white; padding: 40px; border-radius: 20px; text-align: center; width: 85%; max-width: 350px; box-shadow: 0 10px 30px rgba(0,0,0,0.1); }
-        #shareBtn { background: #06C755; color: white; border: none; padding: 15px 0; width: 100%; border-radius: 12px; font-weight: bold; cursor: pointer; font-size: 16px; margin-top: 20px; transition: 0.3s; }
-        #shareBtn:disabled { background: #e0e0e0; color: #999; cursor: not-allowed; }
-        .info { font-size: 14px; color: #666; margin-bottom: 10px; line-height: 1.6; }
-        .debug-box { font-size: 10px; color: #ccc; margin-top: 20px; text-align: left; background: #fafafa; padding: 8px; border-radius: 5px; overflow-wrap: break-word; }
+        .card { background: white; padding: 30px; border-radius: 20px; text-align: center; width: 90%; max-width: 350px; box-shadow: 0 10px 30px rgba(0,0,0,0.1); }
+        #shareBtn { background: #06C755; color: white; border: none; padding: 15px 0; width: 100%; border-radius: 12px; font-weight: bold; cursor: pointer; font-size: 16px; margin-top: 20px; }
+        #shareBtn:disabled { background: #e0e0e0; color: #999; }
+        .debug-panel { font-size: 10px; color: #999; margin-top: 20px; text-align: left; background: #fafafa; padding: 10px; border-radius: 8px; border: 1px solid #eee; word-break: break-all; }
     </style>
 </head>
 <body>
     <div class="card">
-        <h2>名片分享系統</h2>
-        <p id="info" class="info">連線雲端資料中...</p>
+        <h3 id="info">正在讀取名片資料...</h3>
         <button id="shareBtn" onclick="doShare()" disabled>確認中...</button>
-        <div class="debug-box" id="debug">系統初始化中...</div>
+        <div class="debug-panel">
+            <b>系統診斷：</b><br>
+            識別 ID：<span id="final-id" style="color:blue">等待中</span><br>
+            狀態：<span id="sys-msg">初始化</span>
+        </div>
     </div>
 
     <script>
@@ -27,65 +29,71 @@
         const GAS_API = 'https://script.google.com/macros/s/AKfycbwtAVozv0JnuTdPRI3y-dPZN_MOWnafxc74nPP4NbVqS8ukNTp_5fiJPxLl6kMC4S8i/exec'; 
         let flexData = null;
 
-        // 【終極參數捕捉器】支援 # 與 ? 並智慧排除 Token 雜訊
-        function getCleanID() {
-            const currentUrl = window.location.href;
+        // 【絕對攔截器】不論 ID 藏在哪，都把它挖出來
+        function searchID() {
+            const fullUrl = window.location.href;
             
-            // 1. 優先掃描 Hash (#雨思設計)
-            let hashPart = window.location.hash.substring(1);
-            if (hashPart) {
-                let id = decodeURIComponent(hashPart).split('?')[0].split('&')[0];
-                if (id && !id.includes('access_token')) return id;
-            }
+            // 1. 先找 Hash (#雨思設計)
+            let hash = window.location.hash.replace('#', '');
+            if (hash && !hash.includes('access_token') && hash.length < 30) return decodeURIComponent(hash);
 
-            // 2. 掃描標準 Query (?id=)
+            // 2. 找 Query (?id=)
             const params = new URLSearchParams(window.location.search);
-            let idParam = params.get('id');
-            if (idParam && !idParam.includes('access_token')) return idParam;
+            if (params.has('id')) return params.get('id');
 
-            // 3. 核心救援：從 LINE 登入跳轉後的 liff.state 尋找 ID
+            // 3. 找 liff.state (手機跳轉後的唯一救命草)
             const state = params.get('liff.state');
             if (state) {
-                const decodeState = decodeURIComponent(state);
-                const stateParams = new URLSearchParams(decodeState.startsWith('?') ? decodeState : '?' + decodeState);
-                let stateId = stateParams.get('id');
-                if (stateId && !stateId.includes('access_token')) return stateId;
+                const decodedState = decodeURIComponent(state);
+                const stateParams = new URLSearchParams(decodedState.includes('?') ? decodedState.split('?')[1] : decodedState);
+                if (stateParams.has('id')) return stateParams.get('id');
             }
 
-            // 4. 最後退路：本地記憶體
-            return localStorage.getItem('last_known_id');
+            // 4. 最後嘗試從本地存儲拿回登入前的記憶
+            return localStorage.getItem('vcard_id');
         }
 
         async function init() {
             const info = document.getElementById('info');
             const btn = document.getElementById('shareBtn');
-            const debug = document.getElementById('debug');
+            const finalIdSpan = document.getElementById('final-id');
+            const sysMsg = document.getElementById('sys-msg');
 
-            const id = getCleanID();
+            // 先試著抓一次 ID
+            let id = searchID();
             if (id) {
-                localStorage.setItem('last_known_id', id);
-                debug.innerText = "偵測對象：" + id;
-            } else {
-                info.innerText = "請由名片連結進入";
-                debug.innerText = "ID 解析失敗 (雜訊攔截)";
-                return;
+                localStorage.setItem('vcard_id', id); // 登入前先記住 ID
+                finalIdSpan.innerText = id;
             }
 
             try {
-                const res = await fetch(`${GAS_API}?id=${encodeURIComponent(id)}`);
-                const result = await res.json();
+                await liff.init({ liffId: LIFF_ID });
                 
-                if (result.success) {
-                    flexData = result.data;
-                    info.innerText = `分享對象：${result.name}`;
-                    await liff.init({ liffId: LIFF_ID });
-                    btn.innerText = liff.isLoggedIn() ? "立即發送名片" : "點擊登入並分享";
-                    btn.disabled = false;
+                // 登入後再抓一次 ID (防止跳轉後遺失)
+                id = searchID();
+                if (!id) id = localStorage.getItem('vcard_id');
+
+                if (id) {
+                    finalIdSpan.innerText = id;
+                    sysMsg.innerText = "連線資料庫...";
+                    const res = await fetch(`${GAS_API}?id=${encodeURIComponent(id)}`);
+                    const result = await res.json();
+                    
+                    if (result.success) {
+                        flexData = result.data;
+                        info.innerText = `分享：${result.name}`;
+                        btn.innerText = liff.isLoggedIn() ? "立即發送名片" : "點擊登入並分享";
+                        btn.disabled = false;
+                        sysMsg.innerText = "系統就緒";
+                    } else {
+                        info.innerText = "找不到資料：" + id;
+                    }
                 } else {
-                    info.innerText = `找不到資料：${id}`;
+                    info.innerText = "請由名片連結進入";
+                    finalIdSpan.innerText = "未偵測到參數";
                 }
             } catch (err) {
-                debug.innerText = "連線失敗：" + err.message;
+                sysMsg.innerText = "錯誤: " + err.message;
             }
         }
 
@@ -93,12 +101,8 @@
             if (!liff.isLoggedIn()) {
                 liff.login({ redirectUri: window.location.href });
             } else {
-                try {
-                    const res = await liff.shareTargetPicker([flexData]);
-                    if (res) liff.closeWindow();
-                } catch (err) {
-                    alert("發送失敗：請確認後台 Scopes 勾選 shareTargetPicker");
-                }
+                const res = await liff.shareTargetPicker([flexData]);
+                if (res) liff.closeWindow();
             }
         }
         init();
