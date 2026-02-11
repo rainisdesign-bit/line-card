@@ -19,16 +19,30 @@
     <div class="card">
         <div id="loader" class="loader"></div>
         <h2>名片分享系統</h2>
-        <p id="info" class="info">正在同步雲端資料庫...</p>
+        <p id="info" class="info">正在解析名片參數...</p>
         <button id="shareBtn" onclick="doShare()" disabled>確認中...</button>
         <p id="status" style="font-size: 11px; color: #aaa; margin-top: 25px; border-top: 1px solid #eee; padding-top: 10px;"></p>
     </div>
 
     <script>
         const LIFF_ID = '2009104422-Un7RU7tQ'; 
-        // 已經為你填入剛才提供的 GAS 網址
         const GAS_API = 'https://script.google.com/macros/s/AKfycbwtAVozv0JnuTdPRI3y-dPZN_MOWnafxc74nPP4NbVqS8ukNTp_5fiJPxLl6kMC4S8i/exec'; 
         let flexData = null;
+
+        // 【核心修正】強力解析 URL 參數，包含被 LINE 隱藏的 liff.state
+        function getID() {
+            const urlParams = new URLSearchParams(window.location.search);
+            let id = urlParams.get('id');
+            if (id) return id;
+
+            // 如果一般參數沒有，去 liff.state 裡面挖
+            const state = urlParams.get('liff.state');
+            if (state) {
+                const stateParams = new URLSearchParams(state);
+                return stateParams.get('id');
+            }
+            return sessionStorage.getItem('last_id');
+        }
 
         async function init() {
             const info = document.getElementById('info');
@@ -36,25 +50,17 @@
             const status = document.getElementById('status');
             const loader = document.getElementById('loader');
 
-            // 1. 抓取參數並鎖定緩存 (解決手機跳轉參數遺失問題)
-            const urlParams = new URLSearchParams(window.location.search);
-            let id = urlParams.get('id');
-            
-            if (!id) {
-                id = sessionStorage.getItem('last_id');
-            } else {
-                sessionStorage.setItem('last_id', id);
-            }
+            const id = getID();
+            if (id) sessionStorage.setItem('last_id', id);
 
             if (!id) {
-                info.innerText = "請由名片連結進入\n(缺少 ID 參數)";
+                info.innerText = "請由名片連結進入\n(系統未偵測到 ID)";
                 loader.style.display = 'none';
                 return;
             }
 
             try {
-                // 2. 向 GAS 請求 JSON 資料 (跨網域抓取)
-                status.innerText = "正在連線 GAS API...";
+                status.innerText = "連線雲端資料庫...";
                 const res = await fetch(`${GAS_API}?id=${encodeURIComponent(id)}`);
                 const result = await res.json();
                 
@@ -62,39 +68,35 @@
                     flexData = result.data;
                     info.innerText = `分享對象：${result.name}`;
                     
-                    // 3. 初始化 LIFF
-                    status.innerText = "正在啟動 LINE SDK...";
+                    status.innerText = "啟動 LINE 服務...";
                     await liff.init({ liffId: LIFF_ID });
                     
-                    status.innerText = "系統就緒 (GitHub 託管)";
+                    status.innerText = "系統就緒 (GitHub 模式)";
                     loader.style.display = 'none';
                     btn.innerText = liff.isLoggedIn() ? "立即發送名片" : "點擊登入並分享";
                     btn.disabled = false;
                 } else {
-                    info.innerText = `資料庫找不到「${id}」`;
+                    info.innerText = `找不到「${id}」的資料`;
                     loader.style.display = 'none';
                 }
             } catch (err) {
-                status.innerText = "初始化失敗：" + err.message;
+                status.innerText = "錯誤：" + err.message;
                 loader.style.display = 'none';
             }
         }
 
         async function doShare() {
             if (!liff.isLoggedIn()) {
-                // 明確告知跳轉回來的網址要帶有 id
-                const currentUrl = new URL(window.location.href);
-                liff.login({ redirectUri: currentUrl.href });
+                liff.login({ redirectUri: window.location.href });
             } else {
                 try {
                     const res = await liff.shareTargetPicker([flexData]);
                     if (res) liff.closeWindow();
                 } catch (err) {
-                    alert("發送失敗：請檢查 LINE Developers 是否開啟 shareTargetPicker 權限");
+                    alert("發送失敗：請檢查 Scopes 是否開啟 shareTargetPicker");
                 }
             }
         }
-        
         init();
     </script>
 </body>
