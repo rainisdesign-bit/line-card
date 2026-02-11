@@ -11,15 +11,15 @@
         #shareBtn { background: #06C755; color: white; border: none; padding: 15px 0; width: 100%; border-radius: 12px; font-weight: bold; cursor: pointer; font-size: 16px; margin-top: 20px; transition: 0.3s; }
         #shareBtn:disabled { background: #e0e0e0; color: #999; cursor: not-allowed; }
         .info { font-size: 14px; color: #666; margin-bottom: 10px; line-height: 1.6; }
-        .debug-log { font-size: 10px; color: #ccc; margin-top: 20px; text-align: left; background: #fafafa; padding: 8px; border-radius: 5px; }
+        .debug-box { font-size: 10px; color: #ccc; margin-top: 20px; text-align: left; background: #fafafa; padding: 8px; border-radius: 5px; overflow-wrap: break-word; }
     </style>
 </head>
 <body>
     <div class="card">
         <h2>名片分享系統</h2>
-        <p id="info" class="info">連線雲端資料庫中...</p>
+        <p id="info" class="info">連線中...</p>
         <button id="shareBtn" onclick="doShare()" disabled>確認中...</button>
-        <div class="debug-log" id="debug">系統初始化中...</div>
+        <div class="debug-box" id="debug">初始化中...</div>
     </div>
 
     <script>
@@ -27,27 +27,22 @@
         const GAS_API = 'https://script.google.com/macros/s/AKfycbwtAVozv0JnuTdPRI3y-dPZN_MOWnafxc74nPP4NbVqS8ukNTp_5fiJPxLl6kMC4S8i/exec'; 
         let flexData = null;
 
-        // 【終極 ID 救援器】
-        function getID() {
-            // 1. 嘗試從 URL Hash 抓取 (#雨思設計)
-            let id = window.location.hash.substring(1);
-            if (id && id.length > 1) return decodeURIComponent(id);
-
-            // 2. 嘗試從 URL Query 抓取 (?id=...)
-            const urlParams = new URLSearchParams(window.location.search);
-            id = urlParams.get('id');
-            if (id) return id;
-
-            // 3. 嘗試從 liff.state 抓取
-            const state = urlParams.get('liff.state');
-            if (state) {
-                const stateParams = new URLSearchParams(state.startsWith('?') ? state : '?' + state);
-                id = stateParams.get('id');
-                if (id) return id;
+        // 【過濾解碼器】排除 LINE 的雜訊金鑰
+        function getCleanID() {
+            // A. 從 Hash 抓取 (#雨思設計)
+            let hash = window.location.hash.substring(1);
+            if (hash && hash.length > 1) {
+                // 過濾掉 Hash 後面黏著的參數
+                let cleanId = decodeURIComponent(hash).split('?')[0].split('&')[0];
+                if (cleanId && !cleanId.includes('access_token')) return cleanId;
             }
 
-            // 4. 嘗試從本地長期快取抓取
-            return localStorage.getItem('last_known_id');
+            // B. 從 URL 參數抓取
+            const urlParams = new URLSearchParams(window.location.search);
+            let id = urlParams.get('id');
+            if (id && !id.includes('access_token')) return id;
+
+            return sessionStorage.getItem('last_known_id');
         }
 
         async function init() {
@@ -55,36 +50,31 @@
             const btn = document.getElementById('shareBtn');
             const debug = document.getElementById('debug');
 
-            const id = getID();
+            const id = getCleanID();
             if (id) {
-                localStorage.setItem('last_known_id', id);
-                debug.innerText = "偵測到對象：" + id;
+                sessionStorage.setItem('last_known_id', id);
+                debug.innerText = "偵測對象：" + id;
             } else {
-                info.innerText = "請重新由名片連結進入";
-                debug.innerText = "找不到 ID 參數";
+                info.innerText = "請由名片連結進入";
+                debug.innerText = "ID 解析失敗 (雜訊攔截)";
                 return;
             }
 
             try {
-                // 向 GAS 請求 JSON 資料
                 const res = await fetch(`${GAS_API}?id=${encodeURIComponent(id)}`);
                 const result = await res.json();
                 
                 if (result.success) {
                     flexData = result.data;
                     info.innerText = `分享對象：${result.name}`;
-                    
-                    // 初始化 LIFF
                     await liff.init({ liffId: LIFF_ID });
-                    
-                    debug.innerText = "LINE 服務已就緒";
                     btn.innerText = liff.isLoggedIn() ? "立即發送名片" : "點擊登入並分享";
                     btn.disabled = false;
                 } else {
                     info.innerText = `找不到資料：${id}`;
                 }
             } catch (err) {
-                debug.innerText = "API 連線失敗：" + err.message;
+                debug.innerText = "API 錯誤：" + err.message;
             }
         }
 
@@ -92,12 +82,8 @@
             if (!liff.isLoggedIn()) {
                 liff.login({ redirectUri: window.location.href });
             } else {
-                try {
-                    const res = await liff.shareTargetPicker([flexData]);
-                    if (res) liff.closeWindow();
-                } catch (err) {
-                    alert("發送失敗：請檢查 Scopes 設定");
-                }
+                const res = await liff.shareTargetPicker([flexData]);
+                if (res) liff.closeWindow();
             }
         }
         init();
