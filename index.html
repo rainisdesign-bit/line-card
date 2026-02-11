@@ -3,88 +3,102 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=0">
-    <title>名片分享 | RainThink Design</title>
+    <title>名片分享 | 雨思設計</title>
     <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
     <style>
-        body { font-family: sans-serif; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; background: #f8f9fa; }
-        .card { background: white; padding: 35px; border-radius: 24px; text-align: center; width: 85%; max-width: 350px; box-shadow: 0 12px 40px rgba(0,0,0,0.12); }
-        #shareBtn { background: #06C755; color: white; border: none; padding: 16px 0; width: 100%; border-radius: 14px; font-weight: bold; cursor: pointer; font-size: 16px; margin-top: 20px; transition: 0.3s; }
-        #shareBtn:disabled { background: #eee; color: #bbb; cursor: not-allowed; }
-        .status-msg { font-size: 14px; color: #666; margin-bottom: 8px; line-height: 1.5; }
-        .debug-info { font-size: 10px; color: #ddd; margin-top: 20px; text-align: left; word-break: break-all; border-top: 1px solid #f0f0f0; padding-top: 10px; }
+        body { font-family: "Microsoft JhengHei", sans-serif; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; background: #f4f7f9; }
+        .card { background: white; padding: 30px; border-radius: 20px; text-align: center; width: 90%; max-width: 350px; box-shadow: 0 10px 30px rgba(0,0,0,0.1); }
+        #shareBtn { background: #06C755; color: white; border: none; padding: 15px 0; width: 100%; border-radius: 12px; font-weight: bold; cursor: pointer; font-size: 16px; margin-top: 20px; }
+        #shareBtn:disabled { background: #e0e0e0; color: #999; }
+        .info-text { font-size: 15px; color: #333; margin-bottom: 15px; font-weight: bold; line-height: 1.5; }
+        .diagnostic-box { font-size: 10px; color: #999; margin-top: 20px; text-align: left; background: #f8f9fa; padding: 10px; border-radius: 8px; border: 1px solid #eee; word-break: break-all; }
     </style>
 </head>
 <body>
     <div class="card">
-        <h3 id="targetName">雨思名片系統</h3>
-        <p id="info" class="status-msg">正在連線雲端資料庫...</p>
-        <button id="shareBtn" onclick="doShare()" disabled>請稍候...</button>
-        <div id="debug" class="debug-info">系統初始化...</div>
+        <h3 style="margin-top:0">雨思名片系統</h3>
+        <p id="info" class="info-text">正在讀取資料庫...</p>
+        <button id="shareBtn" onclick="doShare()" disabled>確認中...</button>
+        
+        <div class="diagnostic-box">
+            <b>系統診斷：</b><br>
+            識別 ID：<span id="diag-id" style="color:blue">搜尋中</span><br>
+            系統狀態：<span id="diag-status">載入中</span>
+        </div>
     </div>
 
     <script>
         const LIFF_ID = '2009104422-Un7RU7tQ'; 
-        const GAS_API = 'https://script.google.com/macros/s/AKfycbwtAVozv0JnuTdPRI3y-dPZN_MOWnafxc74nPP4NbVqS8ukNTp_5fiJPxLl6kMC4S8i/exec';
+        const GAS_API = 'https://script.google.com/macros/s/AKfycbwtAVozv0JnuTdPRI3y-dPZN_MOWnafxc74nPP4NbVqS8ukNTp_5fiJPxLl6kMC4S8i/exec'; 
         let flexData = null;
 
-        // 🟢 核心邏輯：在第一毫秒就搶救 ID
-        function getID() {
-            const url = window.location.href;
-            const urlObj = new URL(url);
+        // 【終極攔截器】不論 LINE 怎麼跳轉，都把 ID 挖出來
+        function captureID() {
+            const fullUrl = window.location.href;
             
-            // 1. 優先從錨點 (#) 抓取
-            let id = window.location.hash.substring(1);
-            if (id && !id.includes('access_token')) return decodeURIComponent(id);
-
-            // 2. 嘗試從標準參數 (?id=) 抓取
-            let idParam = urlObj.searchParams.get('id');
-            if (idParam && !idParam.includes('access_token')) return idParam;
-
-            // 3. 嘗試從 LINE 跳轉後的 state 抓取
-            const state = urlObj.searchParams.get('liff.state');
-            if (state) {
-                const stateParams = new URLSearchParams(state.startsWith('?') ? state : '?' + state);
-                let stateId = stateParams.get('id');
-                if (stateId) return stateId;
+            // 1. 嘗試從 # 號後方抓取 (#雨思設計)
+            let hashPart = window.location.hash.replace('#', '');
+            if (hashPart && !hashPart.includes('access_token')) {
+                return decodeURIComponent(hashPart).split('?')[0];
             }
 
-            // 4. 從本地硬碟恢復 (這是最穩的一道防線)
-            return localStorage.getItem('last_vcard_id');
+            // 2. 嘗試從標準網址參數抓取 (?id=)
+            const urlParams = new URLSearchParams(window.location.search);
+            if (urlParams.has('id')) return urlParams.get('id');
+
+            // 3. 嘗試從登入跳轉後的隱藏 state 中抓取
+            const state = urlParams.get('liff.state');
+            if (state) {
+                const stateParams = new URLSearchParams(decodeURIComponent(state).includes('?') ? decodeURIComponent(state).split('?')[1] : decodeURIComponent(state));
+                if (stateParams.has('id')) return stateParams.get('id');
+            }
+
+            // 4. 最後嘗試從本地暫存恢復
+            return sessionStorage.getItem('vcard_id_backup');
         }
 
         async function init() {
             const info = document.getElementById('info');
             const btn = document.getElementById('shareBtn');
-            const debug = document.getElementById('debug');
+            const diagId = document.getElementById('diag-id');
+            const diagStatus = document.getElementById('diag-status');
 
-            const currentId = getID();
-            if (currentId) {
-                localStorage.setItem('last_vcard_id', currentId); // 永久記住
-                debug.innerText = "已鎖定 ID: " + currentId;
-            } else {
-                info.innerText = "請由名片連結進入";
-                debug.innerText = "未偵測到 ID 參數";
-                return;
+            // 第一時間鎖定 ID 並存入暫存
+            let id = captureID();
+            if (id) {
+                sessionStorage.setItem('vcard_id_backup', id);
+                diagId.innerText = id;
             }
 
             try {
-                // 向 GAS 請求資料
-                const response = await fetch(`${GAS_API}?id=${encodeURIComponent(currentId)}`);
-                const result = await response.json();
-                
-                if (result.success) {
-                    flexData = result.data;
-                    document.getElementById('targetName').innerText = result.name;
-                    info.innerText = "資料同步完成";
+                await liff.init({ liffId: LIFF_ID });
+                diagStatus.innerText = "LIFF 就緒";
+
+                // 登入後再次確認 ID
+                if (!id) id = sessionStorage.getItem('vcard_id_backup');
+
+                if (id) {
+                    diagId.innerText = id;
+                    diagStatus.innerText = "同步雲端資料...";
                     
-                    await liff.init({ liffId: LIFF_ID });
-                    btn.innerText = liff.isLoggedIn() ? "立即分享名片" : "點擊登入並分享";
-                    btn.disabled = false;
+                    const res = await fetch(`${GAS_API}?id=${encodeURIComponent(id)}`);
+                    const result = await res.json();
+                    
+                    if (result.success) {
+                        flexData = result.data;
+                        info.innerText = `分享對象：${result.name}`;
+                        btn.innerText = liff.isLoggedIn() ? "立即發送名片" : "點擊登入並分享";
+                        btn.disabled = false;
+                        diagStatus.innerText = "系統完成";
+                    } else {
+                        info.innerText = "找不到資料：" + id;
+                    }
                 } else {
-                    info.innerText = "找不到資料：" + currentId;
+                    info.innerText = "請由名片連結進入";
+                    diagId.innerText = "未偵測到參數";
                 }
             } catch (err) {
-                debug.innerText = "錯誤: " + err.message;
+                diagStatus.innerText = "失敗：" + err.message;
             }
         }
 
@@ -92,12 +106,8 @@
             if (!liff.isLoggedIn()) {
                 liff.login({ redirectUri: window.location.href });
             } else {
-                try {
-                    const res = await liff.shareTargetPicker([flexData]);
-                    if (res) liff.closeWindow();
-                } catch (err) {
-                    alert("請確認 LINE Developers 後台已勾選 shareTargetPicker 權限");
-                }
+                const res = await liff.shareTargetPicker([flexData]);
+                if (res) liff.closeWindow();
             }
         }
         init();
