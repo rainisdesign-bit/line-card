@@ -19,7 +19,7 @@
         <h2>名片分享系統</h2>
         <p id="info" class="info">連線雲端資料中...</p>
         <button id="shareBtn" onclick="doShare()" disabled>確認中...</button>
-        <div class="debug-box" id="debug">系統準備中...</div>
+        <div class="debug-box" id="debug">系統初始化中...</div>
     </div>
 
     <script>
@@ -27,23 +27,23 @@
         const GAS_API = 'https://script.google.com/macros/s/AKfycbwtAVozv0JnuTdPRI3y-dPZN_MOWnafxc74nPP4NbVqS8ukNTp_5fiJPxLl6kMC4S8i/exec'; 
         let flexData = null;
 
-        // 【終極參數捕捉器】支援 # 格式並過濾亂碼
-        function getID() {
+        // 【終極參數捕捉器】支援 # 與 ? 並排除 Token 雜訊
+        function getCleanID() {
             const url = new URL(window.location.href);
-            const params = new URLSearchParams(url.search);
-
-            // 1. 優先嘗試 Hash (#雨思設計) - 對應你剛改的公式
+            
+            // 1. 優先檢查 Hash (#雨思設計)
             let hash = window.location.hash.substring(1);
             if (hash) {
                 let id = decodeURIComponent(hash).split('?')[0].split('&')[0];
-                if (id && !id.includes('access_token') && id.length < 50) return id;
+                if (id && !id.includes('access_token')) return id;
             }
 
-            // 2. 嘗試標準參數 (?id=...)
+            // 2. 檢查標準參數 (?id=)
+            const params = new URLSearchParams(url.search);
             let idParam = params.get('id');
             if (idParam && !idParam.includes('access_token')) return idParam;
 
-            // 3. 核心救援：從 LINE 跳轉後的 liff.state 中抓回 ID
+            // 3. 核心救援：從 LINE 跳轉後的 liff.state 中搜尋
             const state = params.get('liff.state');
             if (state) {
                 const stateParams = new URLSearchParams(state.startsWith('?') ? state : '?' + state);
@@ -51,7 +51,7 @@
                 if (stateId && !stateId.includes('access_token')) return stateId;
             }
 
-            // 4. 最後從本地快取恢復
+            // 4. 最後嘗試從本地存取恢復
             return localStorage.getItem('last_known_id');
         }
 
@@ -60,7 +60,7 @@
             const btn = document.getElementById('shareBtn');
             const debug = document.getElementById('debug');
 
-            const id = getID();
+            const id = getCleanID();
             if (id) {
                 localStorage.setItem('last_known_id', id);
                 debug.innerText = "偵測對象：" + id;
