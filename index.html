@@ -8,16 +8,16 @@
     <style>
         body { font-family: "Microsoft JhengHei", sans-serif; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; background: #f4f7f9; }
         .card { background: white; padding: 30px; border-radius: 20px; text-align: center; width: 90%; max-width: 350px; box-shadow: 0 10px 30px rgba(0,0,0,0.1); }
-        #shareBtn { background: #06C755; color: white; border: none; padding: 15px 0; width: 100%; border-radius: 12px; font-weight: bold; cursor: pointer; font-size: 16px; margin-top: 20px; transition: 0.3s; }
-        #shareBtn:disabled { background: #e0e0e0; color: #999; cursor: not-allowed; }
-        .info { font-size: 15px; color: #333; margin-bottom: 15px; font-weight: bold; }
-        .diag { font-size: 10px; color: #999; margin-top: 20px; text-align: left; background: #f8f9fa; padding: 10px; border-radius: 8px; border: 1px solid #eee; word-break: break-all; }
+        #shareBtn { background: #06C755; color: white; border: none; padding: 15px 0; width: 100%; border-radius: 12px; font-weight: bold; cursor: pointer; font-size: 16px; margin-top: 20px; }
+        #shareBtn:disabled { background: #e0e0e0; color: #999; }
+        .msg { font-size: 15px; color: #333; margin-bottom: 10px; font-weight: bold; }
+        .diag { font-size: 10px; color: #999; margin-top: 20px; text-align: left; background: #fafafa; padding: 10px; border-radius: 8px; border: 1px solid #eee; word-break: break-all; }
     </style>
 </head>
 <body>
     <div class="card">
         <h3 style="margin-top:0">雨思名片系統</h3>
-        <p id="info" class="info">讀取雲端資料中...</p>
+        <p id="info" class="msg">連線中...</p>
         <button id="shareBtn" onclick="doShare()" disabled>確認中...</button>
         <div class="diag">
             <b>診斷資訊：</b><br>
@@ -28,30 +28,31 @@
 
     <script>
         const LIFF_ID = '2009104422-Un7RU7tQ'; 
+        // ⚠️ 請檢查：這裡的網址必須是你最後一次「部署」後產生的新網址
         const GAS_API = 'https://script.google.com/macros/s/AKfycbwtAVozv0JnuTdPRI3y-dPZN_MOWnafxc74nPP4NbVqS8ukNTp_5fiJPxLl6kMC4S8i/exec'; 
+
         let flexData = null;
 
-        // 【雷達掃描器】無視位置，直接從全網址搜尋 ID
-        function radarGetID() {
-            const fullUrl = decodeURIComponent(window.location.href);
+        // 【通用解析法】相容 #、? 以及跳轉後的網址
+        function getTargetID() {
+            const url = window.location.href;
             
-            // 1. 優先從錨點搜尋 (#)
+            // 1. 找 # 號 (例如 #雨思設計)
             if (window.location.hash) {
-                let h = window.location.hash.replace('#', '').split('?')[0];
-                if (h && h.length < 20 && !h.includes('access_token')) return h;
+                return decodeURIComponent(window.location.hash.substring(1)).split('?')[0];
             }
 
-            // 2. 從標準參數搜尋 (?id=)
+            // 2. 找 ?id= 參數
             const params = new URLSearchParams(window.location.search);
             if (params.has('id')) return params.get('id');
 
-            // 3. 從 LINE 隱藏的 liff.state 搜尋
+            // 3. 找跳轉後的 liff.state
             const state = params.get('liff.state');
             if (state) {
                 const sp = new URLSearchParams(decodeURIComponent(state).includes('?') ? decodeURIComponent(state).split('?')[1] : decodeURIComponent(state));
                 if (sp.has('id')) return sp.get('id');
             }
-            return localStorage.getItem('vcard_backup');
+            return null;
         }
 
         async function init() {
@@ -60,39 +61,34 @@
             const diagId = document.getElementById('diag-id');
             const diagStatus = document.getElementById('diag-status');
 
-            let id = radarGetID();
+            const id = getTargetID();
             if (id) {
-                localStorage.setItem('vcard_backup', id);
                 diagId.innerText = id;
-            }
-
-            try {
-                await liff.init({ liffId: LIFF_ID });
-                diagStatus.innerText = "LIFF 已就緒";
-                
-                if (!id) id = localStorage.getItem('vcard_backup');
-
-                if (id) {
-                    diagId.innerText = id;
-                    diagStatus.innerText = "同步 GAS 資料庫...";
+                try {
+                    diagStatus.innerText = "正在連線 GAS...";
                     const res = await fetch(`${GAS_API}?id=${encodeURIComponent(id)}`);
                     const result = await res.json();
                     
                     if (result.success) {
                         flexData = result.data;
                         info.innerText = `分享對象：${result.name}`;
+                        
+                        diagStatus.innerText = "啟動 LINE 服務...";
+                        await liff.init({ liffId: LIFF_ID });
+                        
                         btn.innerText = liff.isLoggedIn() ? "立即發送名片" : "點擊登入並分享";
                         btn.disabled = false;
-                        diagStatus.innerText = "完成";
+                        diagStatus.innerText = "連線成功";
                     } else {
                         info.innerText = "找不到資料：" + id;
+                        diagStatus.innerText = "API 回傳失敗";
                     }
-                } else {
-                    info.innerText = "請由名片連結進入";
-                    diagId.innerText = "未偵測到 ID";
+                } catch (err) {
+                    diagStatus.innerText = "API 連線錯誤: " + err.message;
                 }
-            } catch (err) {
-                diagStatus.innerText = "系統錯誤: " + err.message;
+            } else {
+                info.innerText = "請由名片連結進入";
+                diagId.innerText = "未偵測到 ID";
             }
         }
 
@@ -100,8 +96,12 @@
             if (!liff.isLoggedIn()) {
                 liff.login({ redirectUri: window.location.href });
             } else {
-                const res = await liff.shareTargetPicker([flexData]);
-                if (res) liff.closeWindow();
+                try {
+                    const res = await liff.shareTargetPicker([flexData]);
+                    if (res) liff.closeWindow();
+                } catch (err) {
+                    alert("發送失敗：請檢查 LIFF 權限");
+                }
             }
         }
         init();
