@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>名片分享 | 雨思設計</title>
+    <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+    <style>
+        body { font-family: sans-serif; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; background: #f4f7f9; }
+        .card { background: white; padding: 40px; border-radius: 20px; text-align: center; width: 85%; max-width: 350px; box-shadow: 0 10px 30px rgba(0,0,0,0.1); }
+        #shareBtn { background: #06C755; color: white; border: none; padding: 15px 0; width: 100%; border-radius: 12px; font-weight: bold; cursor: pointer; font-size: 16px; margin-top: 20px; transition: 0.3s; }
+        #shareBtn:disabled { background: #e0e0e0; color: #999; }
+        .info { font-size: 14px; color: #666; margin-bottom: 10px; }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <h2>名片分享系統</h2>
+        <p id="info" class="info">正在從雲端抓取資料...</p>
+        <button id="shareBtn" onclick="doShare()" disabled>確認中...</button>
+        <p id="status" style="font-size: 11px; color: #999; margin-top: 20px;"></p>
+    </div>
+
+    <script>
+        const LIFF_ID = '2009104422-Un7RU7tQ'; 
+        const GAS_API = '你的GAS部署網址/exec'; // ⚠️ 重要：請換成你的 GAS 網址
+        let flexData = null;
+
+        async function init() {
+            const info = document.getElementById('info');
+            const btn = document.getElementById('shareBtn');
+            const status = document.getElementById('status');
+
+            // 1. 抓取參數並鎖定緩存
+            const urlParams = new URLSearchParams(window.location.search);
+            let id = urlParams.get('id') || sessionStorage.getItem('last_id');
+            if (!id) { info.innerText = "請由名片連結進入"; return; }
+            sessionStorage.setItem('last_id', id);
+
+            try {
+                // 2. 向 GAS 請求 JSON 資料 (解決手機跳轉遺失問題)
+                const res = await fetch(`${GAS_API}?id=${encodeURIComponent(id)}`);
+                const result = await res.json();
+                
+                if (result.success) {
+                    flexData = result.data;
+                    info.innerText = `分享對象：${result.name}`;
+                    
+                    // 3. 初始化 LIFF
+                    await liff.init({ liffId: LIFF_ID });
+                    status.innerText = "連線成功";
+                    btn.innerText = liff.isLoggedIn() ? "立即發送名片" : "點擊登入並分享";
+                    btn.disabled = false;
+                } else {
+                    info.innerText = "資料庫找不到此 ID";
+                }
+            } catch (err) { status.innerText = "連線失敗：" + err.message; }
+        }
+
+        async function doShare() {
+            if (!liff.isLoggedIn()) {
+                liff.login({ redirectUri: window.location.href });
+            } else {
+                const res = await liff.shareTargetPicker([flexData]);
+                if (res) liff.closeWindow();
+            }
+        }
+        init();
+    </script>
+</body>
+</html>
