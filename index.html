@@ -7,21 +7,28 @@
     <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
     <style>
         body { font-family: "Microsoft JhengHei", sans-serif; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; background: #f4f7f9; }
-        .card { background: white; padding: 40px; border-radius: 20px; text-align: center; width: 85%; max-width: 350px; box-shadow: 0 10px 30px rgba(0,0,0,0.1); }
+        .card { background: white; padding: 30px; border-radius: 20px; text-align: center; width: 90%; max-width: 350px; box-shadow: 0 10px 30px rgba(0,0,0,0.1); }
         #shareBtn { background: #06C755; color: white; border: none; padding: 15px 0; width: 100%; border-radius: 12px; font-weight: bold; cursor: pointer; font-size: 16px; margin-top: 20px; transition: 0.3s; }
         #shareBtn:disabled { background: #e0e0e0; color: #999; cursor: not-allowed; }
-        .info { font-size: 14px; color: #666; margin-bottom: 10px; line-height: 1.6; }
-        .loader { border: 4px solid #f3f3f3; border-top: 4px solid #06C755; border-radius: 50%; width: 30px; height: 30px; animation: spin 1s linear infinite; margin: 0 auto 15px auto; }
+        .info { font-size: 15px; color: #333; margin-bottom: 10px; font-weight: bold; }
+        .debug-panel { font-size: 10px; color: #999; margin-top: 20px; text-align: left; background: #f8f9fa; padding: 10px; border-radius: 8px; border: 1px solid #eee; word-break: break-all; }
+        .loader { border: 3px solid #f3f3f3; border-top: 3px solid #06C755; border-radius: 50%; width: 24px; height: 24px; animation: spin 1s linear infinite; margin: 0 auto 15px auto; }
         @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
     </style>
 </head>
 <body>
     <div class="card">
         <div id="loader" class="loader"></div>
-        <h2>名片分享系統</h2>
-        <p id="info" class="info">正在識別名片參數...</p>
+        <h3 style="margin-top:0">雨思名片分享系統</h3>
+        <p id="info" class="info">正在解析名片參數...</p>
         <button id="shareBtn" onclick="doShare()" disabled>確認中...</button>
-        <p id="status" style="font-size: 11px; color: #aaa; margin-top: 25px; border-top: 1px solid #eee; padding-top: 10px;"></p>
+        
+        <div class="debug-panel">
+            <b>診斷資訊：</b><br>
+            抓取 ID：<span id="found-id">搜尋中...</span><br>
+            SDK 狀態：<span id="sdk-status">等待中</span><br>
+            原始網址：<span id="raw-url">載入中...</span>
+        </div>
     </div>
 
     <script>
@@ -29,46 +36,53 @@
         const GAS_API = 'https://script.google.com/macros/s/AKfycbwtAVozv0JnuTdPRI3y-dPZN_MOWnafxc74nPP4NbVqS8ukNTp_5fiJPxLl6kMC4S8i/exec'; 
         let flexData = null;
 
-        // 【最強參數偵測器】解決手機 LINE 轉址遺失 ID 的問題
-        function findMyID() {
-            const url = new URL(window.location.href);
-            const urlParams = new URLSearchParams(url.search);
+        // 【終極參數捕捉器】
+        function catchID() {
+            const search = window.location.search;
+            const params = new URLSearchParams(search);
             
-            // 1. 從標準網址找
-            let id = urlParams.get('id');
+            // 1. 嘗試從標準網址抓 ?id=
+            let id = params.get('id');
             if (id) return id;
 
-            // 2. 從 LINE 登入後的 state 參數找 (最常發生在手機端)
-            const state = urlParams.get('liff.state');
-            if (state) {
-                const stateParams = new URLSearchParams(state.startsWith('?') ? state : '?' + state);
+            // 2. 嘗試從 liff.state 抓 (手機跳轉後的藏身處)
+            const liffState = params.get('liff.state');
+            if (liffState) {
+                // liff.state 內容可能長這樣: ?id=雨思設計 或 id=雨思設計
+                const decodedState = decodeURIComponent(liffState);
+                const stateParams = new URLSearchParams(decodedState.startsWith('?') ? decodedState : '?' + decodedState);
                 id = stateParams.get('id');
                 if (id) return id;
             }
 
-            // 3. 從瀏覽器快取找
-            return sessionStorage.getItem('backup_id');
+            // 3. 嘗試從 sessionStorage 恢復
+            return sessionStorage.getItem('saved_id');
         }
 
         async function init() {
             const info = document.getElementById('info');
             const btn = document.getElementById('shareBtn');
-            const status = document.getElementById('status');
-            const loader = document.getElementById('loader');
+            const foundIdSpan = document.getElementById('found-id');
+            const sdkStatus = document.getElementById('sdk-status');
+            const rawUrl = document.getElementById('raw-url');
 
-            const id = findMyID();
+            rawUrl.innerText = window.location.href;
+            const id = catchID();
+
             if (id) {
-                sessionStorage.setItem('backup_id', id);
-                status.innerText = "偵測到 ID: " + id;
+                sessionStorage.setItem('saved_id', id);
+                foundIdSpan.innerText = id;
+                foundIdSpan.style.color = "blue";
             } else {
-                info.innerText = "請由名片連結進入\n(系統未偵測到參數)";
-                loader.style.display = 'none';
+                info.innerText = "參數遺失，請重新開啟連結";
+                foundIdSpan.innerText = "未偵測到 ID";
+                foundIdSpan.style.color = "red";
+                document.getElementById('loader').style.display = 'none';
                 return;
             }
 
             try {
-                // 向 GAS 請求 JSON 資料
-                status.innerText = "連線雲端資料庫...";
+                sdkStatus.innerText = "連線 GAS API...";
                 const res = await fetch(`${GAS_API}?id=${encodeURIComponent(id)}`);
                 const result = await res.json();
                 
@@ -76,21 +90,20 @@
                     flexData = result.data;
                     info.innerText = `分享對象：${result.name}`;
                     
-                    // 初始化 LIFF
-                    status.innerText = "啟動 LINE 服務...";
+                    sdkStatus.innerText = "初始化 LINE SDK...";
                     await liff.init({ liffId: LIFF_ID });
                     
-                    status.innerText = "系統就緒 (GitHub)";
-                    loader.style.display = 'none';
+                    sdkStatus.innerText = "系統就緒 (GitHub)";
+                    document.getElementById('loader').style.display = 'none';
                     btn.innerText = liff.isLoggedIn() ? "立即發送名片" : "點擊登入並分享";
                     btn.disabled = false;
                 } else {
-                    info.innerText = `找不到「${id}」的資料`;
-                    loader.style.display = 'none';
+                    info.innerText = `找不到資料：${id}`;
+                    document.getElementById('loader').style.display = 'none';
                 }
             } catch (err) {
-                status.innerText = "初始化錯誤：" + err.message;
-                loader.style.display = 'none';
+                sdkStatus.innerText = "連線失敗: " + err.message;
+                document.getElementById('loader').style.display = 'none';
             }
         }
 
@@ -102,7 +115,7 @@
                     const res = await liff.shareTargetPicker([flexData]);
                     if (res) liff.closeWindow();
                 } catch (err) {
-                    alert("發送失敗：請確認 Scopes 是否開啟 shareTargetPicker");
+                    alert("發送失敗：請檢查 Scopes 設定");
                 }
             }
         }
