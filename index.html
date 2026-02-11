@@ -27,31 +27,32 @@
         const GAS_API = 'https://script.google.com/macros/s/AKfycbwtAVozv0JnuTdPRI3y-dPZN_MOWnafxc74nPP4NbVqS8ukNTp_5fiJPxLl6kMC4S8i/exec'; 
         let flexData = null;
 
-        // 【終極參數捕捉器】支援 # 與 ? 並排除 Token 雜訊
+        // 【終極參數捕捉器】支援 # 與 ? 並智慧排除 Token 雜訊
         function getCleanID() {
-            const url = new URL(window.location.href);
+            const currentUrl = window.location.href;
             
-            // 1. 優先檢查 Hash (#雨思設計)
-            let hash = window.location.hash.substring(1);
-            if (hash) {
-                let id = decodeURIComponent(hash).split('?')[0].split('&')[0];
+            // 1. 優先掃描 Hash (#雨思設計)
+            let hashPart = window.location.hash.substring(1);
+            if (hashPart) {
+                let id = decodeURIComponent(hashPart).split('?')[0].split('&')[0];
                 if (id && !id.includes('access_token')) return id;
             }
 
-            // 2. 檢查標準參數 (?id=)
-            const params = new URLSearchParams(url.search);
+            // 2. 掃描標準 Query (?id=)
+            const params = new URLSearchParams(window.location.search);
             let idParam = params.get('id');
             if (idParam && !idParam.includes('access_token')) return idParam;
 
-            // 3. 核心救援：從 LINE 跳轉後的 liff.state 中搜尋
+            // 3. 核心救援：從 LINE 登入跳轉後的 liff.state 尋找 ID
             const state = params.get('liff.state');
             if (state) {
-                const stateParams = new URLSearchParams(state.startsWith('?') ? state : '?' + state);
+                const decodeState = decodeURIComponent(state);
+                const stateParams = new URLSearchParams(decodeState.startsWith('?') ? decodeState : '?' + decodeState);
                 let stateId = stateParams.get('id');
                 if (stateId && !stateId.includes('access_token')) return stateId;
             }
 
-            // 4. 最後嘗試從本地存取恢復
+            // 4. 最後退路：本地記憶體
             return localStorage.getItem('last_known_id');
         }
 
