@@ -8,18 +8,17 @@
     <style>
         body { font-family: "Microsoft JhengHei", sans-serif; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; background: #f4f7f9; }
         .card { background: white; padding: 30px; border-radius: 20px; text-align: center; width: 90%; max-width: 350px; box-shadow: 0 10px 30px rgba(0,0,0,0.1); }
-        #shareBtn { background: #06C755; color: white; border: none; padding: 15px 0; width: 100%; border-radius: 12px; font-weight: bold; cursor: pointer; font-size: 16px; margin-top: 20px; }
-        #shareBtn:disabled { background: #e0e0e0; color: #999; }
-        .msg { font-size: 15px; color: #333; margin-bottom: 10px; font-weight: bold; }
-        .diag { font-size: 10px; color: #999; margin-top: 20px; text-align: left; background: #fafafa; padding: 10px; border-radius: 8px; border: 1px solid #eee; word-break: break-all; }
+        #shareBtn { background: #06C755; color: white; border: none; padding: 15px 0; width: 100%; border-radius: 12px; font-weight: bold; cursor: pointer; font-size: 16px; margin-top: 20px; transition: 0.3s; }
+        #shareBtn:disabled { background: #e0e0e0; color: #999; cursor: not-allowed; }
+        .diagnostic { font-size: 10px; color: #aaa; margin-top: 20px; text-align: left; background: #fafafa; padding: 10px; border-radius: 8px; border: 1px solid #eee; word-break: break-all; }
     </style>
 </head>
 <body>
     <div class="card">
         <h3 style="margin-top:0">雨思名片系統</h3>
-        <p id="info" class="msg">連線中...</p>
+        <p id="info" style="font-size:15px; color:#333;">正在讀取資料...</p>
         <button id="shareBtn" onclick="doShare()" disabled>確認中...</button>
-        <div class="diag">
+        <div class="diagnostic">
             <b>系統診斷：</b><br>
             識別 ID：<span id="diag-id" style="color:blue">搜尋中</span><br>
             狀態：<span id="diag-status">初始化</span>
@@ -30,67 +29,64 @@
         const LIFF_ID = '2009104422-Un7RU7tQ'; 
         const GAS_API = 'https://script.google.com/macros/s/AKfycbwtAVozv0JnuTdPRI3y-dPZN_MOWnafxc74nPP4NbVqS8ukNTp_5fiJPxLl6kMC4S8i/exec'; 
 
-        let flexData = null;
-
-        // 【嚴格過濾解析器】只抓取真正的名片 ID，排除 Token 雜訊
-        function getPureID() {
+        // 【超級過濾器】排除所有 LINE 產生的 Token 雜訊
+        function getCleanID() {
             const url = new URL(window.location.href);
             
-            // 優先找 # 號後面的文字 (格式：...#雨思設計)
+            // 1. 優先找錨點 (#雨思設計)
             let hash = window.location.hash.substring(1);
             if (hash && !hash.includes('access_token')) {
                 return decodeURIComponent(hash).split('?')[0];
             }
 
-            // 找網址參數 ?id=
+            // 2. 找標準參數 (?id=)
             const params = new URLSearchParams(url.search);
-            let idParam = params.get('id');
-            if (idParam && !idParam.includes('access_token')) return idParam;
+            let id = params.get('id');
+            if (id && !id.includes('access_token')) return id;
 
-            // 找跳轉後隱藏在 liff.state 裡的原始 ID
-            const liffState = params.get('liff.state');
-            if (liffState) {
-                const decodedState = decodeURIComponent(liffState);
-                const stateParams = new URLSearchParams(decodedState.includes('?') ? decodedState.split('?')[1] : decodedState);
-                if (stateParams.has('id')) return stateParams.get('id');
+            // 3. 找 liff.state 中的隱藏 ID
+            const state = params.get('liff.state');
+            if (state) {
+                const sp = new URLSearchParams(decodeURIComponent(state).includes('?') ? decodeURIComponent(state).split('?')[1] : decodeURIComponent(state));
+                let stateId = sp.get('id');
+                if (stateId && !stateId.includes('access_token')) return stateId;
             }
-            return null;
+            return sessionStorage.getItem('vcard_cache');
         }
 
         async function init() {
             const info = document.getElementById('info');
             const btn = document.getElementById('shareBtn');
-            const diagId = document.getElementById('diag-id');
-            const diagStatus = document.getElementById('diag-status');
+            const dId = document.getElementById('diag-id');
+            const dStatus = document.getElementById('diag-status');
 
-            const id = getPureID();
+            const id = getCleanID();
             if (id) {
-                diagId.innerText = id;
+                sessionStorage.setItem('vcard_cache', id);
+                dId.innerText = id;
                 try {
-                    diagStatus.innerText = "連線 GAS 資料庫...";
+                    dStatus.innerText = "連線 GAS 資料庫...";
                     const res = await fetch(`${GAS_API}?id=${encodeURIComponent(id)}`);
                     const result = await res.json();
                     
                     if (result.success) {
-                        flexData = result.data;
                         info.innerText = `分享對象：${result.name}`;
+                        window.flexData = result.data;
                         
-                        diagStatus.innerText = "初始化 LINE SDK...";
+                        dStatus.innerText = "啟動 LINE 服務...";
                         await liff.init({ liffId: LIFF_ID });
                         
                         btn.innerText = liff.isLoggedIn() ? "立即發送名片" : "點擊登入並分享";
                         btn.disabled = false;
-                        diagStatus.innerText = "系統完成";
+                        dStatus.innerText = "系統就緒";
                     } else {
-                        info.innerText = "找不到資料：" + id;
-                        diagStatus.innerText = "試算表無此 ID";
+                        info.innerText = "找不到「" + id + "」的資料";
+                        dStatus.innerText = "API 查詢無結果";
                     }
-                } catch (err) {
-                    diagStatus.innerText = "連線失敗: " + err.message;
-                }
+                } catch (err) { dStatus.innerText = "連線錯誤: " + err.message; }
             } else {
-                info.innerText = "請由名片連結進入";
-                diagId.innerText = "未偵測到 ID";
+                info.innerText = "請由正確連結進入";
+                dId.innerText = "未偵測到有效 ID";
             }
         }
 
@@ -99,11 +95,9 @@
                 liff.login({ redirectUri: window.location.href });
             } else {
                 try {
-                    const res = await liff.shareTargetPicker([flexData]);
+                    const res = await liff.shareTargetPicker([window.flexData]);
                     if (res) liff.closeWindow();
-                } catch (err) {
-                    alert("發送失敗：請確認後台 Scopes 勾選 shareTargetPicker");
-                }
+                } catch (err) { alert("發送失敗：請檢查 LIFF Scopes"); }
             }
         }
         init();
