@@ -10,17 +10,19 @@
         .card { background: white; padding: 30px; border-radius: 20px; text-align: center; width: 90%; max-width: 350px; box-shadow: 0 10px 30px rgba(0,0,0,0.1); }
         #shareBtn { background: #06C755; color: white; border: none; padding: 15px 0; width: 100%; border-radius: 12px; font-weight: bold; cursor: pointer; font-size: 16px; margin-top: 20px; transition: 0.3s; }
         #shareBtn:disabled { background: #e0e0e0; color: #999; cursor: not-allowed; }
-        .diag { font-size: 10px; color: #aaa; margin-top: 20px; text-align: left; background: #fafafa; padding: 10px; border-radius: 8px; border: 1px solid #eee; word-break: break-all; }
+        .msg { font-size: 15px; color: #333; margin-bottom: 10px; font-weight: bold; }
+        .diag { font-size: 10px; color: #999; margin-top: 20px; text-align: left; background: #fafafa; padding: 10px; border-radius: 8px; border: 1px solid #eee; word-break: break-all; }
     </style>
 </head>
 <body>
     <div class="card">
         <h3 style="margin-top:0">雨思名片系統</h3>
-        <p id="info" style="font-size:15px; color:#333;">正在識別名片...</p>
+        <p id="info" class="msg">連線中...</p>
         <button id="shareBtn" onclick="doShare()" disabled>確認中...</button>
         <div class="diag">
+            <b>診斷資訊：</b><br>
             識別 ID：<span id="diag-id" style="color:blue">搜尋中</span><br>
-            狀態：<span id="diag-status">載入中</span>
+            狀態：<span id="diag-status">初始化</span>
         </div>
     </div>
 
@@ -28,48 +30,53 @@
         const LIFF_ID = '2009104422-Un7RU7tQ'; 
         const GAS_API = 'https://script.google.com/macros/s/AKfycbwtAVozv0JnuTdPRI3y-dPZN_MOWnafxc74nPP4NbVqS8ukNTp_5fiJPxLl6kMC4S8i/exec'; 
 
-        // 【終極攔截器】在 LINE 產生雜訊前鎖定 ID
-        function getCleanID() {
-            // 優先找 # 號後面的文字
+        // 【終極過濾器】不論 ID 藏在哪，只要是亂碼就剔除
+        function findCleanID() {
+            const currentUrl = window.location.href;
+            
+            // 1. 從 # 號後方抓取 (#雨思設計)
             let hash = window.location.hash.substring(1);
             if (hash) {
                 let id = decodeURIComponent(hash).split('?')[0].split('&')[0];
-                // 如果抓到的是 Token (長度通常 > 50)，則無視它
-                if (id && id.length < 30 && !id.includes('access_token')) return id;
+                if (id && id.length < 30 && !id.includes('token')) return id;
             }
 
-            // 找標準參數 ?id=
+            // 2. 從標準參數抓取 (?id=)
             const params = new URLSearchParams(window.location.search);
             let idParam = params.get('id');
             if (idParam && idParam.length < 30) return idParam;
 
-            // 從本地記憶體恢復 (轉址後的最後救星)
-            return localStorage.getItem('backup_vcard_id');
+            // 3. 從 liff.state 救援
+            const state = params.get('liff.state');
+            if (state) {
+                const sp = new URLSearchParams(decodeURIComponent(state).includes('?') ? decodeURIComponent(state).split('?')[1] : decodeURIComponent(state));
+                let stateId = sp.get('id');
+                if (stateId && stateId.length < 30) return stateId;
+            }
+
+            return localStorage.getItem('vcard_backup_id');
         }
 
         async function init() {
             const info = document.getElementById('info');
             const btn = document.getElementById('shareBtn');
-            const diagId = document.getElementById('diag-id');
-            const diagStatus = document.getElementById('diag-status');
+            const dId = document.getElementById('diag-id');
+            const dStatus = document.getElementById('diag-status');
 
-            // 第一毫秒鎖定 ID
-            const id = getCleanID();
+            const id = findCleanID();
             if (id) {
-                localStorage.setItem('backup_vcard_id', id);
-                diagId.innerText = id;
+                localStorage.setItem('vcard_backup_id', id);
+                dId.innerText = id;
             }
 
             try {
-                diagStatus.innerText = "初始化 LINE SDK...";
+                dStatus.innerText = "啟動 SDK...";
                 await liff.init({ liffId: LIFF_ID });
-
-                // 再次確認 ID (避免登入跳轉後遺失)
-                const finalID = id || localStorage.getItem('backup_vcard_id');
                 
+                const finalID = id || localStorage.getItem('vcard_backup_id');
                 if (finalID) {
-                    diagId.innerText = finalID;
-                    diagStatus.innerText = "連線雲端資料庫...";
+                    dId.innerText = finalID;
+                    dStatus.innerText = "同步 GAS 資料庫...";
                     const res = await fetch(`${GAS_API}?id=${encodeURIComponent(finalID)}`);
                     const result = await res.json();
                     
@@ -78,16 +85,16 @@
                         info.innerText = `分享對象：${result.name}`;
                         btn.innerText = liff.isLoggedIn() ? "立即發送名片" : "點擊登入並分享";
                         btn.disabled = false;
-                        diagStatus.innerText = "準備就緒";
+                        dStatus.innerText = "系統就緒";
                     } else {
                         info.innerText = "找不到「" + finalID + "」的資料";
-                        diagStatus.innerText = "API 查無資料";
+                        dStatus.innerText = "試算表查無此 ID";
                     }
                 } else {
                     info.innerText = "請由名片連結進入";
-                    diagId.innerText = "未偵測到參數";
+                    dId.innerText = "未偵測到參數";
                 }
-            } catch (err) { diagStatus.innerText = "連線失敗: " + err.message; }
+            } catch (err) { dStatus.innerText = "錯誤: " + err.message; }
         }
 
         async function doShare() {
@@ -97,7 +104,7 @@
                 try {
                     const res = await liff.shareTargetPicker([window.flexData]);
                     if (res) liff.closeWindow();
-                } catch (err) { alert("發送失敗：請確認 LIFF 後台 Scopes"); }
+                } catch (err) { alert("發送失敗：請確認 Scopes 已勾選 shareTargetPicker"); }
             }
         }
         init();
